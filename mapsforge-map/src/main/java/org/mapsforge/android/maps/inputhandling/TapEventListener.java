@@ -12,25 +12,10 @@
  * You should have received a copy of the GNU Lesser General Public License along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
-package org.mapsforge.android.maps.overlay;
+package org.mapsforge.android.maps.inputhandling;
 
-import org.mapsforge.core.model.BoundingBox;
+import org.mapsforge.core.model.GeoPoint;
 
-import android.graphics.Canvas;
-
-/**
- * An {@code Overlay} displays additional geographical data on top of a map.
- */
-public interface Overlay extends Comparable<Overlay> {
-	/**
-	 * Draws this {@code Overlay} on the given canvas.
-	 * 
-	 * @param boundingBox
-	 *            the geographical area which should be drawn.
-	 * @param zoomLevel
-	 *            the zoom level at which this {@code Overlay} should draw itself.
-	 * @param canvas
-	 *            the canvas on which this {@code Overlay} should draw itself.
-	 */
-	void draw(BoundingBox boundingBox, byte zoomLevel, Canvas canvas);
+public interface TapEventListener {
+	void onTap(GeoPoint p);
 }

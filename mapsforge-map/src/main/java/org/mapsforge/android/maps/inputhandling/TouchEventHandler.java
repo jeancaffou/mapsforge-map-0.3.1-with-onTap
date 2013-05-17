@@ -14,8 +14,14 @@
  */
 package org.mapsforge.android.maps.inputhandling;
 
+import java.lang.reflect.Method;
+import java.util.Timer;
+import java.util.TimerTask;
+
 import org.mapsforge.android.maps.MapView;
 import org.mapsforge.android.maps.MapViewPosition;
+import org.mapsforge.android.maps.overlay.Overlay;
+import org.mapsforge.core.model.GeoPoint;
 import org.mapsforge.core.model.Point;
 
 import android.content.Context;
@@ -50,6 +56,8 @@ public class TouchEventHandler {
 	private Point previousTapPosition;
 	private long previousTapTime;
 	private final ScaleGestureDetector scaleGestureDetector;
+	private MapView mapView;
+	protected Timer singleTapActionTimer;
 
 	/**
 	 * @param context
@@ -58,6 +66,7 @@ public class TouchEventHandler {
 	 *            the MapView from which the touch events are coming from.
 	 */
 	public TouchEventHandler(Context context, MapView mapView) {
+		this.mapView = mapView;
 		this.mapViewPosition = mapView.getMapViewPosition();
 		ViewConfiguration viewConfiguration = ViewConfiguration.get(context);
 		this.mapMoveDelta = viewConfiguration.getScaledTouchSlop();
@@ -172,25 +181,92 @@ public class TouchEventHandler {
 		this.activePointerId = INVALID_POINTER_ID;
 		if (this.moveThresholdReached) {
 			this.previousEventTap = false;
-		} else {
-			if (this.previousEventTap) {
-				double diffX = Math.abs(motionEvent.getX(pointerIndex) - this.previousTapPosition.x);
-				double diffY = Math.abs(motionEvent.getY(pointerIndex) - this.previousTapPosition.y);
-				long doubleTapTime = motionEvent.getEventTime() - this.previousTapTime;
+			return true;
+		}
 
-				if (diffX < this.doubleTapDelta && diffY < this.doubleTapDelta && doubleTapTime < this.doubleTapTimeout) {
-					// double-tap event, zoom in
-					this.previousEventTap = false;
-					this.mapViewPosition.zoomIn();
-					return true;
+		if (this.previousEventTap) {
+			double diffX = Math.abs(motionEvent.getX(pointerIndex) - this.previousTapPosition.x);
+			double diffY = Math.abs(motionEvent.getY(pointerIndex) - this.previousTapPosition.y);
+			long doubleTapTime = motionEvent.getEventTime() - this.previousTapTime;
+
+			if (diffX < this.doubleTapDelta && diffY < this.doubleTapDelta && doubleTapTime < this.doubleTapTimeout) {
+				// double-tap event, zoom in
+				this.previousEventTap = false;
+				this.mapViewPosition.zoomIn();
+				try {
+					if (this.singleTapActionTimer != null) {
+						this.singleTapActionTimer.cancel();
+					}
+				} catch (Exception e) {
+					e.printStackTrace();
 				}
-			} else {
-				this.previousEventTap = true;
+				return true;
+			}
+		} else {
+			this.previousEventTap = true;
+		}
+
+		// save POINT
+		this.previousTapPosition = new Point(motionEvent.getX(pointerIndex), motionEvent.getY(pointerIndex));
+		this.previousTapTime = motionEvent.getEventTime();
+
+		// Very ugly kludge to add onTap handler
+		GeoPoint pnt = null;
+		try {
+			int x = (int) motionEvent.getX(pointerIndex);
+			int y = (int) motionEvent.getY(pointerIndex);
+			pnt = this.mapView.getProjection().fromPixels(x, y);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+		if (pnt != null) {
+			final GeoPoint tapPoint = pnt;
+			final MapView mapViewFinal = this.mapView;
+			boolean tapInvoked = false;
+
+			synchronized (this.mapView.getOverlays()) {
+				for (final Overlay ovl : this.mapView.getOverlays()) {
+					final Method onTap, checkItemHit;
+					try {
+						checkItemHit = ovl.getClass().getMethod("checkItemHit", GeoPoint.class, MapView.class);
+						onTap = ovl.getClass().getMethod("onTap", GeoPoint.class);
+
+						Boolean result = (Boolean) checkItemHit.invoke(ovl, tapPoint, this.mapView);
+
+						if (result.booleanValue()) {
+							tapInvoked = true;
+							this.singleTapActionTimer = new Timer();
+							this.singleTapActionTimer.schedule(new TimerTask() {
+
+								@Override
+								public void run() {
+									try {
+										onTap.invoke(ovl, tapPoint);
+									} catch (Exception e) {
+										e.printStackTrace();
+									}
+								}
+							}, this.doubleTapTimeout + 10L);
+							break;
+						}
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
+				}
 			}
 
-			this.previousTapPosition = new Point(motionEvent.getX(pointerIndex), motionEvent.getY(pointerIndex));
-			this.previousTapTime = motionEvent.getEventTime();
+			if (!tapInvoked) {
+				this.singleTapActionTimer = new Timer();
+				this.singleTapActionTimer.schedule(new TimerTask() {
+					@Override
+					public void run() {
+						mapViewFinal.onTapEvent(tapPoint);
+					}
+				}, this.doubleTapTimeout + 10L);
+			}
 		}
+
 		return true;
 	}
 }
